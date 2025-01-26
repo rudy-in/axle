@@ -2,14 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const os = std.os;
 const linux = os.linux;
+const log = @import("log.zig");
 
-const ServiceState = enum {
-    Stopped,
-    Starting,
-    Running,
-    Stopping,
-    Failed
-};
+const ServiceState = enum { Stopped, Starting, Running, Stopping, Failed };
 
 const Service = struct {
     name: []const u8,
@@ -20,26 +15,25 @@ const Service = struct {
     restart_policy: RestartPolicy = .Never,
 };
 
-const RestartPolicy = enum {
-    Never,
-    OnFailure,
-    Always
-};
+const RestartPolicy = enum { Never, OnFailure, Always };
 
 const InitSystem = struct {
     allocator: std.mem.Allocator,
     services: std.ArrayList(Service),
     running: bool = true,
+    logger: log.Logger,
 
     pub fn init(allocator: std.mem.Allocator) InitSystem {
         return InitSystem{
             .allocator = allocator,
             .services = std.ArrayList(Service).init(allocator),
+            .logger = try log.Logger.init(allocator, .{}),
         };
     }
 
     pub fn deinit(self: *InitSystem) void {
         self.services.deinit();
+        self.logger.deinit();
     }
 
     pub fn addService(self: *InitSystem, service: Service) !void {
@@ -52,26 +46,33 @@ const InitSystem = struct {
         }
     }
 
-fn startService(self: *InitSystem, service: *Service) !void {
-    
-    if (service.state != .Stopped) return;
+    fn startService(self: *InitSystem, service: *Service) !void {
+        try self.logger.log(service.name, .Info, "Starting service", .File);
 
-    const argv = [_][]const u8{ service.path };
-    var child = std.process.Child.init(&argv, self.allocator);
-    
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
+        if (service.state != .Stopped) return;
 
-    try child.spawn();
-    const term = try child.wait();
+        if (service.state == .Running) {
+            try self.logger.log(service.name, .Info, "Service started successfully", .Console);
+        } else {
+            try self.logger.log(service.name, .Error, "Service failed to start", .File);
+        }
 
-    service.pid = child.id;
-    service.state = switch (term) {
-        .Exited => |code| if (code == 0) .Running else .Failed,
-        else => .Failed,
-    };
-}
+        const argv = [_][]const u8{service.path};
+        var child = std.process.Child.init(&argv, self.allocator);
+
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Ignore;
+
+        try child.spawn();
+        const term = try child.wait();
+
+        service.pid = child.id;
+        service.state = switch (term) {
+            .Exited => |code| if (code == 0) .Running else .Failed,
+            else => .Failed,
+        };
+    }
 
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
         for (self.services.items) |*service| {
@@ -100,11 +101,7 @@ fn startService(self: *InitSystem, service: *Service) !void {
 
             defer std.posix.close(@as(std.posix.fd_t, @intCast(signal_fd)));
 
-            
-            const bytes_read = try std.posix.read(
-    @as(std.posix.fd_t, @intCast(signal_fd)), 
-    std.mem.asBytes(&info)[0..@sizeOf(linux.signalfd_siginfo)]
-);
+            const bytes_read = try std.posix.read(@as(std.posix.fd_t, @intCast(signal_fd)), std.mem.asBytes(&info)[0..@sizeOf(linux.signalfd_siginfo)]);
 
             if (bytes_read == 0) continue;
 
@@ -113,7 +110,6 @@ fn startService(self: *InitSystem, service: *Service) !void {
                 linux.SIG.TERM, linux.SIG.INT => self.running = false,
                 else => {},
             }
-
         }
     }
 
@@ -128,15 +124,15 @@ fn startService(self: *InitSystem, service: *Service) !void {
                         0 => .Stopped,
                         else => .Failed,
                     };
-                    
+
                     switch (service.restart_policy) {
                         .Always => self.startService(service) catch |err| {
-                            std.debug.print("Failed to restart service {s}: {}\n", .{service.name, err});
+                            std.debug.print("Failed to restart service {s}: {}\n", .{ service.name, err });
                         },
                         .OnFailure => {
                             if (exit_status != 0) {
                                 self.startService(service) catch |err| {
-                                    std.debug.print("Failed to restart failed service {s}: {}\n", .{service.name, err});
+                                    std.debug.print("Failed to restart failed service {s}: {}\n", .{ service.name, err });
                                 };
                             }
                         },
