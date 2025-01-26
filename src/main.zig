@@ -23,7 +23,7 @@ const InitSystem = struct {
     running: bool = true,
     logger: log.Logger,
 
-    pub fn init(allocator: std.mem.Allocator) InitSystem {
+    pub fn init(allocator: std.mem.Allocator) !InitSystem {
         return InitSystem{
             .allocator = allocator,
             .services = std.ArrayList(Service).init(allocator),

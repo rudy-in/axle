@@ -54,7 +54,7 @@ pub const Logger = struct {
 
     pub fn init(allocator: std.mem.Allocator, config: LoggerConfig) !Logger {
         const log_file = try std.fs.cwd().createFile(config.log_path, .{
-            .mode = std.fs.File.Mode.read_write,
+            .mode = 0o666,
             .truncate = false,
         });
 
@@ -146,7 +146,7 @@ pub const Logger = struct {
         }
 
         self.log_file = try std.fs.cwd().createFile(log_path, .{
-            .mode = std.fs.File.Mode.read_write,
+            .mode = 0o666,
             .truncate = false,
         });
     }
