@@ -53,38 +53,24 @@ const InitSystem = struct {
     }
 
 fn startService(self: *InitSystem, service: *Service) !void {
-    _ = self;
+    
     if (service.state != .Stopped) return;
 
-    const pid = blk: {
-        const fork_result = linux.fork();
-        
-        if (fork_result == std.math.maxInt(usize)) {
-            return error.SystemCallFailed;
-        }
-        
-        break :blk fork_result;
+    const argv = [_][]const u8{ service.path };
+    var child = std.process.Child.init(&argv, self.allocator);
+    
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+
+    try child.spawn();
+    const term = try child.wait();
+
+    service.pid = child.id;
+    service.state = switch (term) {
+        .Exited => |code| if (code == 0) .Running else .Failed,
+        else => .Failed,
     };
-
-    if (pid == 0) {
-        const argv = [_:null]?[*:0]const u8{ 
-            @ptrCast([*:0]const u8, service.path.ptr), 
-            null 
-        };
-
-        const envp = [_:null]?[*:0]const u8{null};
-        const path = service.path.ptr[0..service.path.len :0];
-        _ = linux.execve(
-            @ptrCast([*:0]const u8, service.path.ptr), 
-            &argv[0], 
-            &envp[0]
-        );
-
-        linux.exit(1);
-    } else {
-        service.pid = pid;
-        service.state = .Running;
-    }
 }
 
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
@@ -98,32 +84,42 @@ fn startService(self: *InitSystem, service: *Service) !void {
 
     pub fn handleSignals(self: *InitSystem) !void {
         var sigset = std.mem.zeroes(linux.sigset_t);
-        try linux.sigaddset(&sigset, linux.SIG.CHLD);
-        try linux.sigaddset(&sigset, linux.SIG.TERM);
-        try linux.sigaddset(&sigset, linux.SIG.INT);
+        linux.sigaddset(&sigset, linux.SIG.CHLD);
+        linux.sigaddset(&sigset, linux.SIG.TERM);
+        linux.sigaddset(&sigset, linux.SIG.INT);
 
         const signal_mask = linux.SIG.BLOCK;
-        try linux.sigprocmask(signal_mask, &sigset, null);
+        _ = linux.sigprocmask(signal_mask, &sigset, null);
 
         while (self.running) {
             var info: linux.signalfd_siginfo = undefined;
-            const signal_fd = try linux.signalfd(-1, &sigset, linux.SFD.NONBLOCK);
-            defer os.close(signal_fd);
+            const signal_fd = linux.signalfd(-1, &sigset, linux.SFD.NONBLOCK);
+            if (signal_fd == std.math.maxInt(usize)) {
+                return error.SignalFDFailed;
+            }
+
+            defer std.posix.close(@as(std.posix.fd_t, @intCast(signal_fd)));
+
             
-            const bytes_read = try os.read(signal_fd, std.mem.asBytes(&info));
+            const bytes_read = try std.posix.read(
+    @as(std.posix.fd_t, @intCast(signal_fd)), 
+    std.mem.asBytes(&info)[0..@sizeOf(linux.signalfd_siginfo)]
+);
+
             if (bytes_read == 0) continue;
 
-            switch (info.ssi_signo) {
+            switch (info.signo) {
                 linux.SIG.CHLD => try self.handleChildSignal(info),
                 linux.SIG.TERM, linux.SIG.INT => self.running = false,
                 else => {},
             }
+
         }
     }
 
     fn handleChildSignal(self: *InitSystem, info: linux.signalfd_siginfo) !void {
-        const pid = info.ssi_pid;
-        const exit_status = info.ssi_status;
+        const pid = info.pid;
+        const exit_status = info.status;
 
         for (self.services.items) |*service| {
             if (service.pid) |service_pid| {
@@ -161,8 +157,8 @@ pub fn main() !void {
     defer init_system.deinit();
 
     const example_service = Service{
-        .name = "example_service",
-        .path = "/path/to/service",
+        .name = "hello-world",
+        .path = "/usr/local/bin/hello-world.sh",
         .restart_policy = .OnFailure,
     };
 
