@@ -6,6 +6,16 @@ const log = @import("log.zig");
 
 const ServiceState = enum { Stopped, Starting, Running, Stopping, Failed };
 
+fn serviceStateToString(state: ServiceState) []const u8 {
+    return switch (state) {
+        .Stopped => "Stopped",
+        .Starting => "Starting",
+        .Running => "Running",
+        .Stopping => "Stopping",
+        .Failed => "Failed",
+    };
+}
+
 const Service = struct {
     name: []const u8,
     pid: ?linux.pid_t = null,
@@ -28,8 +38,8 @@ const InitSystem = struct {
             .allocator = allocator,
             .services = std.ArrayList(Service).init(allocator),
             .logger = try log.Logger.init(allocator, .{
-                .log_path = "/tmp/axle.log", // Temporary, accessible location
-                .log_level = .Debug, // Capture more detailed logs
+                .log_path = "/tmp/axle.log",
+                .log_level = .Debug,
             }),
             .running = true,
         };
@@ -51,14 +61,11 @@ const InitSystem = struct {
     }
 
     fn startService(self: *InitSystem, service: *Service) !void {
-        try self.logger.log(service.name, .Info, "Starting service", .File);
+        try self.logger.log(service.name, .Info, "Attempting to start service", .File);
 
-        if (service.state != .Stopped) return;
-
-        if (service.state == .Running) {
-            try self.logger.log(service.name, .Info, "Service started successfully", .Console);
-        } else {
-            try self.logger.log(service.name, .Error, "Service failed to start", .File);
+        if (service.state != .Stopped) {
+            try self.logger.log(service.name, .Info, "Service is not in a stopped state; current state: {}", .File);
+            return;
         }
 
         const argv = [_][]const u8{service.path};
@@ -66,18 +73,31 @@ const InitSystem = struct {
 
         child.stdin_behavior = .Ignore;
         child.stdout_behavior = .Ignore;
-        child.stderr_behavior = .Ignore;
+        child.stderr_behavior = .Pipe;
 
         try child.spawn();
         const term = try child.wait();
 
         service.pid = child.id;
-        service.state = switch (term) {
-            .Exited => |code| if (code == 0) .Running else .Failed,
-            else => .Failed,
+        service.state = blk: {
+            switch (term) {
+                .Exited => |code| {
+                    if (code == 0) {
+                        try self.logger.log(service.name, .Info, "Service started successfully", .Console);
+                        break :blk .Running;
+                    } else {
+                        try self.logger.log(service.name, .Error, "Service exited with non-zero code: {}", .File);
+
+                        break :blk .Failed;
+                    }
+                },
+                else => {
+                    try self.logger.log(service.name, .Error, "Service terminated unexpectedly", .Console);
+                    break :blk .Failed;
+                },
+            }
         };
     }
-
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
         for (self.services.items) |*service| {
             if (std.mem.eql(u8, service.name, name)) {
@@ -158,8 +178,8 @@ pub fn main() !void {
 
     const example_service = Service{
         .name = "hello-world",
-        .path = "/home/rudy/axle/hello-world.sh",
-        .restart_policy = .Always,
+        .path = "/workspaces/axle/hello-world.sh",
+        .restart_policy = .OnFailure,
     };
 
     init_system.addService(example_service) catch |err| {

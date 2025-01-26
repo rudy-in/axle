@@ -1,5 +1,5 @@
 #!/bin/bash
 while true; do
     echo "Hello, World! $(date)" >> log/hello-world.log
-    sleep 60
+    sleep 1
 done

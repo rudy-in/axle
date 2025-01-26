@@ -74,10 +74,8 @@ pub const Logger = struct {
     }
 
     pub fn log(self: *Logger, service_name: []const u8, level: LogLevel, message: []const u8, target: LogTarget) !void {
-        // Check log level
         if (@intFromEnum(level) > @intFromEnum(self.config.log_level)) return;
 
-        // Create log entry
         const entry = LogEntry{
             .timestamp = std.time.timestamp(),
             .service_name = service_name,
@@ -87,24 +85,19 @@ pub const Logger = struct {
             .target = target,
         };
 
-        // Append to log entries list
         try self.log_entries.append(entry);
 
-        // Write log with both terminal and file output
         try self.writeLog(entry);
     }
 
     fn writeLog(self: *Logger, entry: LogEntry) !void {
-        // Create formatted log line
         const log_line = try std.fmt.allocPrint(self.allocator, "[{d}] {s}/{s}: {s}\n", .{ entry.timestamp, entry.service_name, entry.level.toString(), entry.message });
         defer self.allocator.free(log_line);
 
-        // Always print to console
         std.debug.print("{s}", .{log_line});
 
-        // Write to file based on target
         switch (entry.target) {
-            .Console => {}, // Already printed to console
+            .Console => {},
             .File => {
                 if (self.log_file) |file| {
                     _ = try file.write(log_line);
