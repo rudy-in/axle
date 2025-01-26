@@ -54,7 +54,7 @@ pub const Logger = struct {
 
     pub fn init(allocator: std.mem.Allocator, config: LoggerConfig) !Logger {
         const log_file = try std.fs.cwd().createFile(config.log_path, .{
-            .mode = .read_write,
+            .mode = std.fs.File.Mode.read_write,
             .truncate = false,
         });
 
@@ -74,7 +74,6 @@ pub const Logger = struct {
     }
 
     pub fn log(self: *Logger, service_name: []const u8, level: LogLevel, message: []const u8, target: LogTarget) !void {
-        // Skip logging if message level is higher than configured level
         if (@intFromEnum(level) > @intFromEnum(self.config.log_level)) return;
 
         const entry = LogEntry{
@@ -110,7 +109,6 @@ pub const Logger = struct {
             },
         }
 
-        // Optional: Rotate logs if file exceeds max size
         try self.rotateLogsIfNeeded();
     }
 
@@ -126,12 +124,10 @@ pub const Logger = struct {
     fn rotateLogFiles(self: *Logger) !void {
         const log_path = self.config.log_path;
 
-        // Close current log file
         if (self.log_file) |file| {
             file.close();
         }
 
-        // Rotate log files using copy and delete
         var i = self.config.rotate_files;
         while (i > 0) : (i -= 1) {
             const old_path = try std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ log_path, i });
@@ -140,20 +136,22 @@ pub const Logger = struct {
             const new_path = try std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ log_path, i + 1 });
             defer self.allocator.free(new_path);
 
-            // Use copyFile instead of renameFile
-            std.fs.cwd().copyFile(std.fs.cwd(), old_path, std.fs.cwd(), new_path, .{}) catch {};
+            std.fs.cwd().copyFile(old_path, std.fs.cwd(), new_path, .{}) catch |err| {
+                std.debug.print("Error copying log file: {}\n", .{err});
+            };
 
-            // Delete old file after copying
-            std.fs.cwd().deleteFile(old_path) catch {};
+            std.fs.cwd().deleteFile(old_path) catch |err| {
+                std.debug.print("Error deleting old log file: {}\n", .{err});
+            };
         }
+
         self.log_file = try std.fs.cwd().createFile(log_path, .{
-            .mode = .read_write,
+            .mode = std.fs.File.Mode.read_write,
             .truncate = false,
         });
     }
 };
 
-// Example usage
 test "logger functionality" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
