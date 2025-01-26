@@ -27,7 +27,11 @@ const InitSystem = struct {
         return InitSystem{
             .allocator = allocator,
             .services = std.ArrayList(Service).init(allocator),
-            .logger = try log.Logger.init(allocator, .{}),
+            .logger = try log.Logger.init(allocator, .{
+                .log_path = "/tmp/axle.log", // Temporary, accessible location
+                .log_level = .Debug, // Capture more detailed logs
+            }),
+            .running = true,
         };
     }
 
@@ -149,13 +153,13 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var init_system = InitSystem.init(allocator);
+    var init_system = try InitSystem.init(allocator);
     defer init_system.deinit();
 
     const example_service = Service{
         .name = "hello-world",
-        .path = "/usr/local/bin/hello-world.sh",
-        .restart_policy = .OnFailure,
+        .path = "/home/rudy/axle/hello-world.sh",
+        .restart_policy = .Always,
     };
 
     init_system.addService(example_service) catch |err| {
