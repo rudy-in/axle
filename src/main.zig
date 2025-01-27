@@ -79,8 +79,9 @@ const InitSystem = struct {
 
         service.pid = child.id;
         service.state = .Starting;
-        try self.logger.log(service.name, .Info, "Service has been started");
+        try self.logger.log(service.name, .Info, "Service started with PID: {}", .File);
     }
+
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
         for (self.services.items) |*service| {
             if (std.mem.eql(u8, service.name, name)) {
@@ -105,17 +106,22 @@ const InitSystem = struct {
             if (signal_fd == std.math.maxInt(usize)) {
                 return error.SignalFDFailed;
             }
-
             defer std.posix.close(@as(std.posix.fd_t, @intCast(signal_fd)));
+            const result = std.posix.read(@as(std.posix.fd_t, @intCast(signal_fd)), std.mem.asBytes(&info)[0..@sizeOf(linux.signalfd_siginfo)]);
+            if (result) |bytes_read| {
+                if (bytes_read == 0) continue;
 
-            const bytes_read = try std.posix.read(@as(std.posix.fd_t, @intCast(signal_fd)), std.mem.asBytes(&info)[0..@sizeOf(linux.signalfd_siginfo)]);
-
-            if (bytes_read == 0) continue;
-
-            switch (info.signo) {
-                linux.SIG.CHLD => try self.handleChildSignal(info),
-                linux.SIG.TERM, linux.SIG.INT => self.running = false,
-                else => {},
+                switch (info.signo) {
+                    linux.SIG.CHLD => try self.handleChildSignal(info),
+                    linux.SIG.TERM, linux.SIG.INT => self.running = false,
+                    else => {},
+                }
+            } else |err| {
+                if (err == error.WouldBlock) {
+                    continue;
+                } else {
+                    return err; 
+                }
             }
         }
     }
