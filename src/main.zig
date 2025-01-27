@@ -76,27 +76,10 @@ const InitSystem = struct {
         child.stderr_behavior = .Pipe;
 
         try child.spawn();
-        const term = try child.wait();
 
         service.pid = child.id;
-        service.state = blk: {
-            switch (term) {
-                .Exited => |code| {
-                    if (code == 0) {
-                        try self.logger.log(service.name, .Info, "Service started successfully", .Console);
-                        break :blk .Running;
-                    } else {
-                        try self.logger.log(service.name, .Error, "Service exited with non-zero code: {}", .File);
-
-                        break :blk .Failed;
-                    }
-                },
-                else => {
-                    try self.logger.log(service.name, .Error, "Service terminated unexpectedly", .Console);
-                    break :blk .Failed;
-                },
-            }
-        };
+        service.state = .Starting;
+        try self.logger.log(service.name, .Info, "Service has been started");
     }
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
         for (self.services.items) |*service| {
