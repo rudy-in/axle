@@ -79,7 +79,7 @@ const InitSystem = struct {
 
         service.pid = child.id;
         service.state = .Starting;
-        try self.logger.log(service.name, .Info, "Service started with PID: {}", .File);
+        try self.logger.log(service.name, .Info, "Service has been started", .File);
     }
 
     fn findServiceByName(self: *InitSystem, name: []const u8) ?*Service {
@@ -120,7 +120,7 @@ const InitSystem = struct {
                 if (err == error.WouldBlock) {
                     continue;
                 } else {
-                    return err; 
+                    return err;
                 }
             }
         }
