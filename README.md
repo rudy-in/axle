@@ -25,6 +25,15 @@ Making it because systemd sucks, and others are too minimal.
 - [ ] **Debugging tools**  
 - [ ] **Service isolation**
 
+## TODO PID 1:
+- [x] Reaping Zombie Processes
+- [ ] Handling Orphaned Processes
+- [ ] Signal Mask Setup
+- [ ] Service Dependency Management
+- [X] Add watchdog
+- [X] Exit Behavior
+- [ ] File Descriptor Management
+
 ---
 
 #### Copyright (C) 2025 rudy-in
