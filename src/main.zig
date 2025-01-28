@@ -6,16 +6,6 @@ const log = @import("log.zig");
 
 const ServiceState = enum { Stopped, Starting, Running, Stopping, Failed };
 
-fn serviceStateToString(state: ServiceState) []const u8 {
-    return switch (state) {
-        .Stopped => "Stopped",
-        .Starting => "Starting",
-        .Running => "Running",
-        .Stopping => "Stopping",
-        .Failed => "Failed",
-    };
-}
-
 const Service = struct {
     name: []const u8,
     pid: ?linux.pid_t = null,
@@ -23,6 +13,8 @@ const Service = struct {
     path: []const u8,
     dependencies: []const []const u8 = &.{},
     restart_policy: RestartPolicy = .Never,
+    watchdog_interval: ?u64 = null,
+    last_beat: u64 = 0,
 };
 
 const RestartPolicy = enum { Never, OnFailure, Always };
@@ -136,7 +128,8 @@ const InitSystem = struct {
 
             if (result == -1) {
                 return error.WaitpidFailed;
-            } else if (result == 0) {
+            }
+            if (result == 0) {
                 break;
             } else {
                 for (self.services.items) |*service| {
@@ -146,7 +139,6 @@ const InitSystem = struct {
                                 0 => .Stopped,
                                 else => .Failed,
                             };
-
                             switch (service.restart_policy) {
                                 .Always => self.startService(service) catch |err| {
                                     std.debug.print("Failed to restart service {s}: {}\n", .{ service.name, err });
@@ -168,6 +160,33 @@ const InitSystem = struct {
         }
     }
 };
+
+fn watchdogCheck(self: *InitSystem) !void {
+    const now = std.time.timestamp();
+
+    for (self.services.items) |*service| {
+        if (service.watchdog_interval) |interval| {
+            if (now - service.last_beat > interval and service.state == .Running) {
+                std.debug.print("Service {s} missed watchdog, restarting...\n", .{service.name});
+                service.state = .Failed;
+                try self.startService(service);
+            }
+        }
+    }
+}
+
+fn shutdown(self: *InitSystem) !void {
+    std.debug.print("Initiating system shutdown...\n", .{});
+
+    for (self.services.items) |*service| {
+        if (service.state == .Running) {
+            std.debug.print("Stopping service {s}...\n", .{service.name});
+            service.state = .Stopped;
+        }
+    }
+
+    self.running = false;
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
