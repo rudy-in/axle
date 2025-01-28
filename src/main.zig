@@ -126,32 +126,44 @@ const InitSystem = struct {
         }
     }
 
-    fn handleChildSignal(self: *InitSystem, info: linux.signalfd_siginfo) !void {
-        const pid = info.pid;
-        const exit_status = info.status;
+    pub fn handleChildSignal(self: *InitSystem, info: linux.signalfd_siginfo) !void {
+        const pid: i32 = @intCast(info.pid);
+        // const exit_status = info.status;
 
-        for (self.services.items) |*service| {
-            if (service.pid) |service_pid| {
-                if (service_pid == pid) {
-                    service.state = switch (exit_status) {
-                        0 => .Stopped,
-                        else => .Failed,
-                    };
+        while (true) {
+            var status: u32 = 0;
+            const result = linux.waitpid(pid, &status, 0);
 
-                    switch (service.restart_policy) {
-                        .Always => self.startService(service) catch |err| {
-                            std.debug.print("Failed to restart service {s}: {}\n", .{ service.name, err });
-                        },
-                        .OnFailure => {
-                            if (exit_status != 0) {
-                                self.startService(service) catch |err| {
-                                    std.debug.print("Failed to restart failed service {s}: {}\n", .{ service.name, err });
-                                };
+            if (result == -1) {
+                return error.WaitpidFailed;
+            } else if (result == 0) {
+                break;
+            } else {
+                for (self.services.items) |*service| {
+                    if (service.pid) |service_pid| {
+                        if (service_pid == result) {
+                            service.state = switch (status) {
+                                0 => .Stopped,
+                                else => .Failed,
+                            };
+
+                            switch (service.restart_policy) {
+                                .Always => self.startService(service) catch |err| {
+                                    std.debug.print("Failed to restart service {s}: {}\n", .{ service.name, err });
+                                },
+                                .OnFailure => {
+                                    if (status != 0) {
+                                        self.startService(service) catch |err| {
+                                            std.debug.print("Failed to restart failed service {s}: {}\n", .{ service.name, err });
+                                        };
+                                    }
+                                },
+                                .Never => {},
                             }
-                        },
-                        .Never => {},
+                        }
                     }
                 }
+                break;
             }
         }
     }
